@@ -3,6 +3,7 @@ from pathlib import Path
 
 from src.data_loader import load_excel
 from src.validation import validate_returns
+from src.scale_review import find_scale_flags, apply_scale_decisions
 
 
 def main():
@@ -38,41 +39,151 @@ def main():
     print(f"\nTotal rows: {len(data)}")
     print(f"Total columns: {len(data.columns)}")
 
-    # 4. Validate the loaded data
+    # 4. Validate the original data
     issues = validate_returns(data)
 
-    # 5. Display validation results
-    print("\nVALIDATION REPORT")
+    print("\nINITIAL VALIDATION")
     print("-" * 55)
 
-    if not issues:
-        print("No validation issues detected.")
-        print("\nSTATUS: VALIDATION PASSED")
+    for issue in issues:
+        print(f"- {issue}")
+
+    errors = [
+        issue for issue in issues
+        if issue.startswith("ERROR:")
+    ]
+
+    if errors:
+        print("\nSTATUS: VALIDATION FAILED")
+        print("Resolve the errors before proceeding.")
+        return
+
+    # 5. Identify suspicious return-scale values
+    flags = find_scale_flags(data)
+
+    working_data = data.copy(deep=True)
+
+    if flags:
+        print("\nRETURN-SCALE REVIEW")
+        print("-" * 55)
+
+        for number, flag in enumerate(flags, start=1):
+            print(
+                f"{number}. Month: {flag['month']} | "
+                f"Fund: {flag['fund']} | "
+                f"Original: {flag['original_value']} | "
+                f"Proposed: {flag['proposed_value']}"
+            )
+
+        print("\nChoose an action:")
+        print("1. Convert all flagged values")
+        print("2. Keep all original values")
+        print("3. Review each value individually")
+
+        while True:
+            choice = input("Enter 1, 2, or 3: ").strip()
+            if choice in {"1", "2", "3"}:
+                break
+            print("Invalid choice. Enter 1, 2, or 3.")
+
+        decisions = {}
+
+        for flag in flags:
+            key = (flag["row_position"], flag["fund"])
+
+            if choice == "1":
+                decisions[key] = "convert"
+            elif choice == "2":
+                decisions[key] = "keep"
+            else:
+                print(
+                    f"\nFund: {flag['fund']} | "
+                    f"Month: {flag['month']}"
+                )
+                print(f"Original: {flag['original_value']}")
+                print(f"Proposed: {flag['proposed_value']}")
+
+                while True:
+                    answer = input(
+                        "Convert this value? (y/n): "
+                    ).strip().lower()
+
+                    if answer in {"y", "n"}:
+                        decisions[key] = (
+                            "convert" if answer == "y" else "keep"
+                        )
+                        break
+
+                    print("Enter y or n.")
+
+        try:
+            working_data = apply_scale_decisions(data, decisions)
+        except ValueError as error:
+            print(f"\nSCALE REVIEW FAILED: {error}")
+            return
+
+        print("\nSCALE REVIEW SUMMARY")
+        print(
+            "Values converted:",
+            sum(v == "convert" for v in decisions.values())
+        )
+        print(
+            "Values kept:",
+            sum(v == "keep" for v in decisions.values())
+        )
+        print("Original Excel workbook remains unchanged.")
 
     else:
-        for issue in issues:
-            print(f"- {issue}")
+        print("\nNo return-scale values were flagged.")
 
-        errors = [
-            issue for issue in issues
-            if issue.startswith("ERROR:")
-        ]
+    # 6. Validate the resulting working copy again
+    final_issues = validate_returns(working_data)
 
-        warnings = [
-            issue for issue in issues
-            if issue.startswith("WARNING:")
-        ]
+    print("\nFINAL VALIDATION")
+    print("-" * 55)
 
-        if errors:
-            print("\nSTATUS: VALIDATION FAILED")
-            print("Resolve the reported errors before proceeding.")
-        elif warnings:
-            print("\nSTATUS: REVIEW REQUIRED")
-            print("Review the warnings before proceeding.")
-        else:
-            print("\nSTATUS: REVIEW REQUIRED")
+    for issue in final_issues:
+        print(f"- {issue}")
 
-    print("\n" + "=" * 55)
+    final_errors = [
+        issue for issue in final_issues
+        if issue.startswith("ERROR:")
+    ]
+
+    final_warnings = [
+        issue for issue in final_issues
+        if issue.startswith("WARNING:")
+    ]
+
+    if final_errors:
+        print("\nSTATUS: VALIDATION FAILED")
+        print("Resolve the errors before proceeding.")
+        return
+
+    if final_warnings:
+        print("\nWarnings remain. Review them before proceeding.")
+
+        while True:
+            answer = input(
+                "Have you reviewed the remaining warnings? (y/n): "
+            ).strip().lower()
+
+            if answer in {"y", "n"}:
+                break
+
+            print("Enter y or n.")
+
+        if answer != "y":
+            print("Workflow stopped.")
+            return
+
+    print("\nFINAL DATA PREVIEW")
+    print("-" * 55)
+    print(working_data.head().to_string(index=False))
+
+    print("\nSTATUS: DATA READY FOR THE NEXT STEP")
+    print("No financial metrics have been calculated yet.")
+    print("=" * 55)
 
 
 if __name__ == "__main__":
