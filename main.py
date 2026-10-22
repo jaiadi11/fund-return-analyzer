@@ -1,13 +1,106 @@
 
 from pathlib import Path
+import math
 
 from src.data_loader import load_excel
 from src.validation import validate_returns
 from src.scale_review import find_scale_flags, apply_scale_decisions
+from src.metrics import (
+    geometric_annualized_return,
+    annualized_volatility,
+    sharpe_ratio,
+)
+
+
+def get_annual_risk_free_rate():
+    """Prompt for an annual risk-free rate entered as a percentage."""
+    while True:
+        raw_value = input(
+            "\nEnter annual risk-free rate in % (example: 4.5): "
+        ).strip()
+
+        try:
+            percentage = float(raw_value)
+        except ValueError:
+            print("Please enter a valid number, such as 4 or 4.5.")
+            continue
+
+        if not math.isfinite(percentage):
+            print("Enter a finite number.")
+            continue
+
+        return percentage / 100.0
+
+
+def display_metrics(working_data):
+    """
+    Calculate and display risk-return metrics for every fund.
+
+    Returns remain decimal values internally.
+    The Month column is excluded from calculations.
+    """
+    risk_free_rate = get_annual_risk_free_rate()
+
+    print(f"\nAnnual risk-free rate used: {risk_free_rate:.2%}")
+
+    headers = [
+        "Fund",
+        "Geometric Annualized Return",
+        "Annualized Volatility",
+        "Sharpe Ratio",
+    ]
+
+    rows = []
+
+    for fund_name in working_data.columns:
+        if fund_name == "Month":
+            continue
+
+        returns = working_data[fund_name].tolist()
+
+        try:
+            annual_return = geometric_annualized_return(returns)
+            volatility = annualized_volatility(returns)
+            ratio = sharpe_ratio(returns, risk_free_rate)
+
+            rows.append(
+                (
+                    str(fund_name),
+                    f"{annual_return:.2%}",
+                    f"{volatility:.2%}",
+                    f"{ratio:.2f}",
+                )
+            )
+
+        except ValueError as error:
+            rows.append(
+                (str(fund_name), "N/A", "N/A", "N/A")
+            )
+            print(f"\nCould not calculate metrics for {fund_name}: {error}")
+
+    print("\nFUND RISK-RETURN METRICS")
+    print("=" * 105)
+    print(
+        f"{headers[0]:<20}"
+        f"{headers[1]:>30}"
+        f"{headers[2]:>27}"
+        f"{headers[3]:>18}"
+    )
+    print("-" * 105)
+
+    for row in rows:
+        print(
+            f"{row[0]:<20}"
+            f"{row[1]:>30}"
+            f"{row[2]:>27}"
+            f"{row[3]:>18}"
+        )
+
+    print("=" * 105)
 
 
 def main():
-    # 1. Locate the sample Excel workbook
+    """Run the complete Excel validation and metrics workflow."""
     project_folder = Path(__file__).resolve().parent
     file_path = (
         project_folder
@@ -19,11 +112,11 @@ def main():
     print("       MUTUAL FUND RETURN ANALYZER")
     print("=" * 55)
 
-    # 2. Load the Excel workbook
+    # 1. Load the Excel workbook.
     try:
         data = load_excel(
             file_path,
-            sheet_name="Monthly_Returns"
+            sheet_name="Monthly_Returns",
         )
     except (FileNotFoundError, ValueError) as error:
         print(f"\nDATA LOADING FAILED: {error}")
@@ -31,15 +124,14 @@ def main():
 
     print("\nExcel workbook loaded successfully.")
 
-    # 3. Display a preview of the data
+    # 2. Preview the data.
     print("\nDATA PREVIEW")
     print("-" * 55)
     print(data.head().to_string(index=False))
-
     print(f"\nTotal rows: {len(data)}")
     print(f"Total columns: {len(data.columns)}")
 
-    # 4. Validate the original data
+    # 3. Validate the original data.
     issues = validate_returns(data)
 
     print("\nINITIAL VALIDATION")
@@ -58,9 +150,8 @@ def main():
         print("Resolve the errors before proceeding.")
         return
 
-    # 5. Identify suspicious return-scale values
+    # 4. Review suspicious return-scale values.
     flags = find_scale_flags(data)
-
     working_data = data.copy(deep=True)
 
     if flags:
@@ -82,8 +173,10 @@ def main():
 
         while True:
             choice = input("Enter 1, 2, or 3: ").strip()
+
             if choice in {"1", "2", "3"}:
                 break
+
             print("Invalid choice. Enter 1, 2, or 3.")
 
         decisions = {}
@@ -93,8 +186,10 @@ def main():
 
             if choice == "1":
                 decisions[key] = "convert"
+
             elif choice == "2":
                 decisions[key] = "keep"
+
             else:
                 print(
                     f"\nFund: {flag['fund']} | "
@@ -125,18 +220,18 @@ def main():
         print("\nSCALE REVIEW SUMMARY")
         print(
             "Values converted:",
-            sum(v == "convert" for v in decisions.values())
+            sum(value == "convert" for value in decisions.values()),
         )
         print(
             "Values kept:",
-            sum(v == "keep" for v in decisions.values())
+            sum(value == "keep" for value in decisions.values()),
         )
         print("Original Excel workbook remains unchanged.")
 
     else:
         print("\nNo return-scale values were flagged.")
 
-    # 6. Validate the resulting working copy again
+    # 5. Validate the resulting working copy.
     final_issues = validate_returns(working_data)
 
     print("\nFINAL VALIDATION")
@@ -177,12 +272,18 @@ def main():
             print("Workflow stopped.")
             return
 
+    # 6. Display the validated working data.
     print("\nFINAL DATA PREVIEW")
     print("-" * 55)
     print(working_data.head().to_string(index=False))
 
-    print("\nSTATUS: DATA READY FOR THE NEXT STEP")
-    print("No financial metrics have been calculated yet.")
+    print("\nSTATUS: DATA READY FOR FINANCIAL ANALYSIS")
+
+    # 7. Calculate the metrics only after validation succeeds.
+    display_metrics(working_data)
+
+    print("\nAnalysis complete.")
+    print("Original Excel workbook remains unchanged.")
     print("=" * 55)
 
 
